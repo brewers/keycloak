@@ -17,6 +17,7 @@
  */
 package org.keycloak.authorization.entitlement;
 
+import org.apache.commons.codec.binary.StringUtils;
 import org.jboss.resteasy.spi.HttpRequest;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
@@ -49,13 +50,7 @@ import org.keycloak.representations.idm.authorization.ScopeRepresentation;
 import org.keycloak.services.ErrorResponseException;
 import org.keycloak.services.resources.Cors;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.OPTIONS;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
+import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.Context;
@@ -69,6 +64,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -99,7 +95,9 @@ public class EntitlementService {
     @GET()
     @Produces("application/json")
     @Consumes("application/json")
-    public void getAll(@PathParam("resource_server_id") String resourceServerId, @Suspended AsyncResponse asyncResponse) {
+    public void getAll(@PathParam("resource_server_id") String resourceServerId,
+                       @QueryParam("resource_filter") String resourceFilter,
+                       @Suspended AsyncResponse asyncResponse) {
         KeycloakIdentity identity = new KeycloakIdentity(this.authorization.getKeycloakSession());
 
         if (resourceServerId == null) {
@@ -116,7 +114,14 @@ public class EntitlementService {
         StoreFactory storeFactory = authorization.getStoreFactory();
         ResourceServer resourceServer = storeFactory.getResourceServerStore().findByClient(client.getId());
 
-        authorization.evaluators().from(Permissions.all(resourceServer, identity, authorization), new KeycloakEvaluationContext(this.authorization.getKeycloakSession())).evaluate(new DecisionResultCollector() {
+        List<ResourcePermission> permissions = Permissions.all(resourceServer, identity, authorization);
+
+        if(resourceFilter != null && !resourceFilter.isEmpty()) {
+            Pattern pattern = Pattern.compile(resourceFilter);
+            permissions = permissions.stream().filter(rp -> pattern.matcher(rp.getResource().getName()).matches()).collect(Collectors.toList());
+        }
+
+        authorization.evaluators().from(permissions, new KeycloakEvaluationContext(this.authorization.getKeycloakSession())).evaluate(new DecisionResultCollector() {
 
             @Override
             public void onError(Throwable cause) {
